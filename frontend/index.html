@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <title>Streaming Chatbot</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            margin: 0;
+            padding: 20px;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        .container {
+            width: 100%;
+            max-width: 600px;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            overflow: hidden;
+        }
+        .auth-container, .chat-container {
+            display: flex;
+            flex-direction: column;
+            height: 80vh;
+        }
+        .auth-container {
+            padding: 40px;
+            text-align: center;
+        }
+        .auth-container h2 {
+            margin-bottom: 30px;
+            color: #333;
+        }
+        .auth-form {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        input {
+            padding: 12px 16px;
+            border: 2px solid #e1e5e9;
+            border-radius: 10px;
+            outline: none;
+            font-size: 14px;
+        }
+        input:focus {
+            border-color: #667eea;
+        }
+        button {
+            padding: 12px 24px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: background 0.3s;
+        }
+        button:hover {
+            background: #5a67d8;
+        }
+        .toggle {
+            margin-top: 20px;
+            color: #667eea;
+            cursor: pointer;
+        }
+        .chat-header {
+            background: #667eea;
+            color: white;
+            padding: 20px;
+            text-align: center;
+            font-weight: bold;
+            font-size: 18px;
+        }
+        #chat {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+            background: #f8f9fa;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        .message {
+            max-width: 70%;
+            padding: 12px 16px;
+            border-radius: 18px;
+            font-size: 14px;
+            line-height: 1.4;
+            word-wrap: break-word;
+        }
+        .user-message {
+            background: #667eea;
+            color: white;
+            align-self: flex-end;
+            border-bottom-right-radius: 4px;
+        }
+        .assistant-message {
+            background: white;
+            color: #333;
+            align-self: flex-start;
+            border-bottom-left-radius: 4px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .input-container {
+            display: flex;
+            padding: 20px;
+            background: white;
+            border-top: 1px solid #eee;
+        }
+        .input-container input {
+            flex: 1;
+            margin-right: 10px;
+        }
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div id="auth" class="auth-container">
+        <h2>Sign In</h2>
+        <form id="auth-form" class="auth-form">
+            <input type="text" id="username" placeholder="Username" required>
+            <input type="email" id="email" placeholder="Email" class="hidden">
+            <input type="password" id="password" placeholder="Password" required>
+            <button type="submit">Sign In</button>
+        </form>
+        <div class="toggle" onclick="toggleAuth()">Don't have an account? Sign Up</div>
+    </div>
+
+    <div id="chat-section" class="chat-container hidden">
+        <div class="chat-header">GPT-4o Streaming Chatbot</div>
+        <div id="chat"></div>
+        <div class="input-container">
+            <input id="message" placeholder="Type a message..." />
+            <button onclick="sendMessage()">Send</button>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script>
+    let token = localStorage.getItem('token');
+    let isSignUp = false;
+
+    const authContainer = document.getElementById('auth');
+    const chatSection = document.getElementById('chat-section');
+    const authForm = document.getElementById('auth-form');
+    const emailInput = document.getElementById('email');
+    const toggleText = document.querySelector('.toggle');
+
+    if (token && !isTokenExpired(token)) {
+        showChat();
+    }
+
+    function isTokenExpired(token) {
+        try {
+            const payload = JSON.parse(atob(token.split('.')[1]));
+            const exp = payload.exp;
+            return Date.now() >= exp * 1000;
+        } catch (e) {
+            return true;
+        }
+    }
+
+    authForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    const username = document.getElementById('username').value;
+    const password = document.getElementById('password').value;
+    const email = document.getElementById('email').value;
+
+    const endpoint = isSignUp ? '/auth/signup' : '/auth/signin';
+
+    try {
+        let fetchOptions;
+
+        if (isSignUp) {
+            // SIGNUP → JSON
+            fetchOptions = {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, email, password })
+            };
+        } else {
+            // SIGNIN → form-urlencoded (REQUIRED by FastAPI OAuth2)
+            const formData = new URLSearchParams();
+            formData.append("username", username);
+            formData.append("password", password);
+
+            fetchOptions = {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded'
+                },
+                body: formData
+            };
+        }
+
+        const response = await fetch(
+            `http://127.0.0.1:8000${endpoint}`,
+            fetchOptions
+        );
+
+        const data = await response.json();
+
+        if (response.ok) {
+            token = data.access_token;
+            localStorage.setItem('token', token);
+            showChat();
+        } else {
+            alert(data.detail || 'Error');
+        }
+
+    } catch (error) {
+        console.error(error);
+        alert('Network error');
+    }
+});
+
+
+    function toggleAuth() {
+        isSignUp = !isSignUp;
+        document.querySelector('h2').textContent = isSignUp ? 'Sign Up' : 'Sign In';
+        emailInput.classList.toggle('hidden');
+        toggleText.textContent = isSignUp ? 'Already have an account? Sign In' : "Don't have an account? Sign Up";
+    }
+
+    function showChat() {
+        authContainer.classList.add('hidden');
+        chatSection.classList.remove('hidden');
+        initChat();
+    }
+
+    function initChat() {
+    const chat = document.getElementById("chat");
+
+    const messageInput = document.getElementById("message");
+
+    // Check if token exists and is not expired
+    if (!token || isTokenExpired(token)) {
+        console.error("No valid token available for WebSocket connection");
+        localStorage.removeItem('token');
+        token = null;
+        authContainer.classList.remove('hidden');
+        chatSection.classList.add('hidden');
+        return;
+    }
+
+    // Build WebSocket URL
+    const wsUrl = `ws://127.0.0.1:8000/ws/chat?token=${encodeURIComponent(token)}`;
+    console.log("Connecting to WebSocket:", wsUrl);
+
+    const ws = new WebSocket(wsUrl);
+
+    let currentResponse = "";
+    let isStreaming = false;
+    let currentMessageDiv = null;
+    let isFirstMessage = true;
+
+    ws.onopen = () => {
+        console.log("WebSocket connected successfully");
+        addMessage("Connected to chatbot!", 'system');
+    };
+
+    ws.onclose = (event) => {
+        console.log("WebSocket closed:", {
+            code: event.code,
+            reason: event.reason,
+            wasClean: event.wasClean
+        });
+
+        let reason = event.reason || 'Unknown reason';
+
+        if (event.code === 1008) {
+            reason = 'Authentication failed. Please sign in again.';
+            localStorage.removeItem('token'); // Clear invalid token
+            token = null;
+            // Show login again
+            authContainer.classList.remove('hidden');
+            chatSection.classList.add('hidden');
+        } else if (event.code === 1006) {
+            reason = 'Connection lost';
+        }
+
+        addMessage(`Connection closed: ${reason}`, 'system');
+    };
+
+    ws.onerror = (error) => {
+        console.error("WebSocket error:", error);
+        addMessage("Connection error occurred. Please check your authentication.", 'system');
+    };
+
+    ws.onmessage = (event) => {
+        console.log("Received message:", event.data);
+
+        if (event.data === "__START__") {
+            isStreaming = true;
+            currentResponse = "";
+
+            currentMessageDiv = document.createElement('div');
+            currentMessageDiv.className = 'message assistant-message';
+            chat.appendChild(currentMessageDiv);
+            scrollToBottom();
+
+        } else if (event.data === "__END__") {
+            if (currentMessageDiv && currentResponse.trim()) {
+                currentMessageDiv.innerHTML = marked.parse(currentResponse);
+            }
+            isStreaming = false;
+            currentMessageDiv = null;
+            scrollToBottom();
+
+        } else if (isStreaming) {
+            currentResponse += event.data;
+            if (currentMessageDiv) {
+                currentMessageDiv.textContent = currentResponse;
+                scrollToBottom();
+            }
+        }
+    };
+
+    window.sendMessage = function() {
+        const input = messageInput.value.trim();
+        if (!input) return;
+
+        if (ws.readyState !== WebSocket.OPEN) {
+            addMessage("Connection not available. Please refresh and sign in again.", 'system');
+            return;
+        }
+
+        addMessage(input, 'user');
+        ws.send(input);
+        messageInput.value = "";
+    };
+
+    // Store WebSocket reference
+    window.currentWebSocket = ws;
+}
+
+
+    function addMessage(text, type) {
+        const chat = document.getElementById("chat");
+        const messageDiv = document.createElement('div');
+        messageDiv.className = `message ${type}-message`;
+        if (type === 'user') {
+            messageDiv.textContent = text;
+        } else if (type === 'system') {
+            messageDiv.style.background = '#f0f0f0';
+            messageDiv.style.color = '#666';
+            messageDiv.style.alignSelf = 'center';
+            messageDiv.style.fontStyle = 'italic';
+            messageDiv.textContent = text;
+        }
+        chat.appendChild(messageDiv);
+        scrollToBottom();
+    }
+
+    function scrollToBottom() {
+        const chat = document.getElementById("chat");
+        chat.scrollTop = chat.scrollHeight;
+    }
+
+    const messageInput = document.getElementById("message");
+    messageInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+            sendMessage();
+        }
+    });
+</script>
+
+</body>
+</html>
