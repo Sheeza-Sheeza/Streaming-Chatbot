@@ -14,9 +14,9 @@ Streaming in chatbots refers to sending responses gradually, token by token (lik
 ## Steps to Run
 
 ### Backend
-1. Navigate to the `backend` folder:
+1. Navigate to the `app` folder:
    ```
-   cd backend
+   cd app
    ```
 2. Install dependencies:
    ```
